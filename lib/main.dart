@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'screens/conversorscreen.dart';
+import 'screens/conversor_screen.dart';
+import 'screens/mercado_screen.dart';
 
 void main() {
   runApp(
@@ -35,7 +36,7 @@ class _TelaInicialState extends State<TelaInicial> {
         child: IndexedStack(
           index: _indice,
           children: const [
-            SizedBox.expand(),
+            MercadoScreen(),
             SizedBox.expand(),
             SizedBox.expand(),
             ConversorScreen(),
