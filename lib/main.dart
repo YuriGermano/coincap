@@ -1,14 +1,47 @@
 import 'package:flutter/material.dart';
+import 'screens/buscar_screen.dart';
+import 'screens/comparar_screen.dart';
 import 'screens/conversor_screen.dart';
+import 'screens/corretoras_screen.dart';
+import 'screens/detalhes_ativo_screen.dart';
+import 'screens/favoritos_screen.dart';
 import 'screens/mercado_screen.dart';
 
 void main() {
-  runApp(
-    const MaterialApp(
+  runApp(const CoinCapApp());
+}
+
+class CoinCapApp extends StatelessWidget {
+  const CoinCapApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'CoinCap',
       debugShowCheckedModeBanner: false,
-      home: TelaInicial(),
-    ),
-  );
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF0A0014),
+        fontFamily: 'Roboto',
+      ),
+      initialRoute: '/',
+      onGenerateRoute: (settings) {
+        if (settings.name == '/detalhes') {
+          final slug = settings.arguments as String? ?? 'bitcoin';
+          return MaterialPageRoute(
+            builder: (_) => DetalhesAtivoScreen(slug: slug),
+          );
+        }
+        if (settings.name == '/comparar') {
+          return MaterialPageRoute(builder: (_) => const CompararScreen());
+        }
+        if (settings.name == '/corretoras') {
+          return MaterialPageRoute(builder: (_) => const CorretorasScreen());
+        }
+        return MaterialPageRoute(builder: (_) => const TelaInicial());
+      },
+    );
+  }
 }
 
 class TelaInicial extends StatefulWidget {
@@ -35,11 +68,15 @@ class _TelaInicialState extends State<TelaInicial> {
         ),
         child: IndexedStack(
           index: _indice,
-          children: const [
-            MercadoScreen(),
-            SizedBox.expand(),
-            SizedBox.expand(),
-            ConversorScreen(),
+          children: [
+            const MercadoScreen(),
+            const BuscarScreen(),
+            FavoritosScreen(
+              onIrParaMercado: () {
+                setState(() => _indice = 0);
+              },
+            ),
+            const ConversorScreen(),
           ],
         ),
       ),
@@ -58,18 +95,22 @@ class _TelaInicialState extends State<TelaInicial> {
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
             label: "Início",
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.search),
+            activeIcon: Icon(Icons.search, color: Color(0xFFA78BFA)),
             label: "Buscar",
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.star_border),
+            activeIcon: Icon(Icons.star),
             label: "Favoritos",
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.swap_horiz),
+            activeIcon: Icon(Icons.swap_horizontal_circle),
             label: "Conversor",
           ),
         ],

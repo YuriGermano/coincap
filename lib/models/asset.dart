@@ -1,7 +1,7 @@
 List<double> _lerHistorico(dynamic historico) {
   if (historico is! Map) return [];
 
-  final csv = historico["last30Days"];
+  final csv = historico["last30Days"] ?? historico["last24Hours"] ?? historico["last365Days"];
   if (csv is! String) return [];
 
   final pontos = <double>[];
@@ -23,6 +23,10 @@ class Asset {
   double? volume;
   double? changePercent24Hr;
   double? supply;
+  double? maxSupply;
+  double? vwap24Hr;
+  int? rank;
+  String? explorer;
   List<double> historico;
 
   Asset({
@@ -34,20 +38,44 @@ class Asset {
     this.volume,
     this.changePercent24Hr,
     this.supply,
+    this.maxSupply,
+    this.vwap24Hr,
+    this.rank,
+    this.explorer,
     required this.historico,
   });
 
-  factory Asset.fromJson(Map<String, dynamic> json) => Asset(
-        slug: json["slug"] ?? '',
-        symbol: json["symbol"] ?? '',
-        name: json["name"] ?? '',
-        price: double.tryParse('${json["price"]}') ?? 0,
-        marketCap: double.tryParse('${json["marketCap"]}'),
-        volume: double.tryParse('${json["volume"]}'),
-        changePercent24Hr: double.tryParse('${json["changePercent24Hr"]}'),
-        supply: double.tryParse('${json["supply"]}'),
-        historico: _lerHistorico(json["history"]),
-      );
+  factory Asset.fromJson(Map<String, dynamic> json) {
+    final slug = (json["slug"] ?? json["id"] ?? '').toString();
+    final symbol = (json["symbol"] ?? '').toString().toUpperCase();
+    final name = (json["name"] ?? slug).toString();
+    final price = double.tryParse('${json["price"] ?? json["priceUsd"]}') ?? 0.0;
+    final marketCap = double.tryParse('${json["marketCap"] ?? json["marketCapUsd"]}');
+    final volume = double.tryParse('${json["volume"] ?? json["volumeUsd24Hr"]}');
+    final changePercent24Hr = double.tryParse('${json["changePercent24Hr"]}');
+    final supply = double.tryParse('${json["supply"]}');
+    final maxSupply = double.tryParse('${json["maxSupply"]}');
+    final vwap24Hr = double.tryParse('${json["vwap24Hr"]}');
+    final rank = int.tryParse('${json["rank"]}');
+    final explorer = json["explorer"]?.toString();
+    final historico = _lerHistorico(json["history"]);
+
+    return Asset(
+      slug: slug,
+      symbol: symbol,
+      name: name,
+      price: price,
+      marketCap: marketCap,
+      volume: volume,
+      changePercent24Hr: changePercent24Hr,
+      supply: supply,
+      maxSupply: maxSupply,
+      vwap24Hr: vwap24Hr,
+      rank: rank,
+      explorer: explorer,
+      historico: historico,
+    );
+  }
 }
 
 class AssetResponse {
@@ -56,6 +84,8 @@ class AssetResponse {
   AssetResponse({required this.data});
 
   factory AssetResponse.fromJson(Map<String, dynamic> json) => AssetResponse(
-        data: List<Asset>.from(json["data"].map((x) => Asset.fromJson(x))),
+        data: List<Asset>.from(
+          (json["data"] as List? ?? []).map((x) => Asset.fromJson(x as Map<String, dynamic>)),
+        ),
       );
 }
