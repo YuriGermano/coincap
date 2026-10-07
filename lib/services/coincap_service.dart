@@ -21,6 +21,7 @@ class CoinCapService {
   static final List<String> _apiKeys = [
     '9dcd68c96ba0f7835834d843d5177ada774c360b9a923444b7581723def24114',
     'b17a68cb2a9151f65c83e46563e86ff450c5fef67f54a6166666c6db4d42b794',
+    '1a433c137bc29daf52dd548c2471925c741c25f234940ede6cc8a739305d0624',
   ];
   static int _chaveIndiceAtual = 0;
 

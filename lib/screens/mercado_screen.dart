@@ -6,6 +6,7 @@ import '../utils/formatadores.dart';
 import 'comparar_screen.dart';
 import 'corretoras_screen.dart';
 import 'detalhes_ativo_screen.dart';
+import 'perfil_screen.dart';
 
 class MercadoScreen extends StatefulWidget {
   const MercadoScreen({super.key});
@@ -308,10 +309,26 @@ class _MercadoScreenState extends State<MercadoScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  IconButton(
-                    tooltip: "Atualizar cotações",
-                    icon: const Icon(Icons.refresh, color: corTextoSuave),
-                    onPressed: () => _carregarDados(forcar: true),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: "Perfil",
+                        icon: const Icon(Icons.person_outline, color: corTextoSuave),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const PerfilScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        tooltip: "Atualizar cotações",
+                        icon: const Icon(Icons.refresh, color: corTextoSuave),
+                        onPressed: () => _carregarDados(forcar: true),
+                      ),
+                    ],
                   ),
                 ],
               ),
