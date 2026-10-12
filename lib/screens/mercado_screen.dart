@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/asset.dart';
 import '../services/coincap_service.dart';
+import '../services/favoritos_service.dart';
 import '../utils/formatadores.dart';
 import 'comparar_screen.dart';
 import 'corretoras_screen.dart';
@@ -214,6 +215,27 @@ class _MercadoScreenState extends State<MercadoScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(width: 8),
+            ValueListenableBuilder<Set<String>>(
+              valueListenable: FavoritosService.instance.favoritosNotifier,
+              builder: (context, favoritos, _) {
+                final isFav = favoritos.contains(ativo.slug.toLowerCase());
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    FavoritosService.instance.alternar(ativo.slug, ativo);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      isFav ? Icons.star : Icons.star_border,
+                      color: isFav ? const Color(0xFFFBBF24) : Colors.white30,
+                      size: 20,
+                    ),
+                  ),
+                );
+              },
             ),
           ],
         ),

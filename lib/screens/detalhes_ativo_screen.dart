@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/asset.dart';
+import '../models/candlestick.dart';
 import '../models/market.dart';
 import '../models/price_point.dart';
 import '../models/ta_indicators.dart';
@@ -8,6 +9,7 @@ import '../services/coincap_service.dart';
 import '../services/favoritos_service.dart';
 import '../utils/formatadores.dart';
 import '../widgets/grafico_detalhes.dart';
+import '../widgets/grafico_velas.dart';
 
 class DetalhesAtivoScreen extends StatefulWidget {
   final String slug;
@@ -30,6 +32,11 @@ class _DetalhesAtivoScreenState extends State<DetalhesAtivoScreen> {
   String _intervaloSelecionado = "7D";
   List<PricePoint> _historico = [];
   bool _carregandoHistorico = true;
+
+  // Tipo de gráfico: false = Linha, true = Velas
+  bool _mostrarVelas = false;
+  List<Candlestick> _velas = [];
+  bool _carregandoVelas = false;
 
   // Aba selecionada: 0 = Visão geral, 1 = Análise técnica, 2 = Onde comprar
   int _abaIndex = 0;
@@ -71,11 +78,35 @@ class _DetalhesAtivoScreenState extends State<DetalhesAtivoScreen> {
         forcarAtualizacao: forcar,
       );
       if (mounted) {
+        FavoritosService.instance.salvarAtivo(detalhes);
         setState(() {
           _ativo = detalhes;
         });
       }
     } catch (_) {}
+  }
+
+  List<Candlestick> _sintetizarVelas(List<PricePoint> pontos) {
+    if (pontos.length < 2) return [];
+    final res = <Candlestick>[];
+    const grupo = 3;
+    for (var i = 0; i < pontos.length; i += grupo) {
+      final pedaco = pontos.sublist(i, (i + grupo > pontos.length) ? pontos.length : i + grupo);
+      if (pedaco.isEmpty) continue;
+      final precos = pedaco.map((p) => p.price).toList();
+      final open = pedaco.first.price;
+      final close = pedaco.last.price;
+      final high = precos.reduce((a, b) => a > b ? a : b);
+      final low = precos.reduce((a, b) => a < b ? a : b);
+      res.add(Candlestick(
+        time: pedaco.first.time,
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+      ));
+    }
+    return res;
   }
 
   Future<void> _carregarHistorico({bool forcar = false}) async {
@@ -115,6 +146,58 @@ class _DetalhesAtivoScreenState extends State<DetalhesAtivoScreen> {
       if (mounted) {
         setState(() {
           _carregandoHistorico = false;
+        });
+      }
+    }
+
+    // Se o modo velas está ativo, carrega as velas também
+    if (_mostrarVelas) {
+      _carregarVelas(forcar: forcar);
+    }
+  }
+
+  Future<void> _carregarVelas({bool forcar = false}) async {
+    setState(() => _carregandoVelas = true);
+
+    String intervalParam;
+    switch (_intervaloSelecionado) {
+      case "1D":
+        intervalParam = "m15";
+        break;
+      case "7D":
+        intervalParam = "h1";
+        break;
+      case "1M":
+        intervalParam = "h6";
+        break;
+      case "1A":
+        intervalParam = "d1";
+        break;
+      default:
+        intervalParam = "h1";
+    }
+
+    try {
+      final candlesticks = await CoinCapService.buscarVelas(
+        widget.slug,
+        interval: intervalParam,
+      );
+      if (mounted) {
+        List<Candlestick> finalVelas = candlesticks;
+        if (finalVelas.isEmpty && _historico.isNotEmpty) {
+          finalVelas = _sintetizarVelas(_historico);
+        }
+        setState(() {
+          _velas = finalVelas;
+          _carregandoVelas = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        final sintetizadas = _historico.isNotEmpty ? _sintetizarVelas(_historico) : <Candlestick>[];
+        setState(() {
+          _velas = sintetizadas;
+          _carregandoVelas = false;
         });
       }
     }
@@ -158,6 +241,15 @@ class _DetalhesAtivoScreenState extends State<DetalhesAtivoScreen> {
       _carregarIndicadores();
     } else if (index == 2) {
       _carregarMercados();
+    }
+  }
+
+  void _alternarTipoGrafico() {
+    setState(() {
+      _mostrarVelas = !_mostrarVelas;
+    });
+    if (_mostrarVelas && _velas.isEmpty) {
+      _carregarVelas();
     }
   }
 
@@ -420,7 +512,8 @@ class _DetalhesAtivoScreenState extends State<DetalhesAtivoScreen> {
                         final isFav = favoritos.contains(ativo.slug.toLowerCase());
                         return GestureDetector(
                           onTap: () {
-                            FavoritosService.instance.alternar(ativo.slug);
+                            FavoritosService.instance.alternar(ativo.slug, ativo);
+                            ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 duration: const Duration(seconds: 1),
@@ -505,48 +598,86 @@ class _DetalhesAtivoScreenState extends State<DetalhesAtivoScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Seletor de Intervalo [1D, 7D, 1M, 1A]
+                      // Seletor de Intervalo + Botão alternar tipo de gráfico
                       Row(
-                        children: ["1D", "7D", "1M", "1A"].map((intervalo) {
-                          final selecionado = _intervaloSelecionado == intervalo;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: GestureDetector(
-                              onTap: () {
-                                if (_intervaloSelecionado != intervalo) {
-                                  setState(() => _intervaloSelecionado = intervalo);
-                                  _carregarHistorico();
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: selecionado ? corDestaque : corPilula,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  intervalo,
-                                  style: TextStyle(
-                                    color: selecionado ? const Color(0xFF0A0014) : Colors.white70,
-                                    fontSize: 13,
-                                    fontWeight: selecionado ? FontWeight.bold : FontWeight.w500,
+                        children: [
+                          ...["1D", "7D", "1M", "1A"].map((intervalo) {
+                            final selecionado = _intervaloSelecionado == intervalo;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: GestureDetector(
+                                onTap: () {
+                                  if (_intervaloSelecionado != intervalo) {
+                                    setState(() => _intervaloSelecionado = intervalo);
+                                    _carregarHistorico();
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: selecionado ? corDestaque : corPilula,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    intervalo,
+                                    style: TextStyle(
+                                      color: selecionado ? const Color(0xFF0A0014) : Colors.white70,
+                                      fontSize: 13,
+                                      fontWeight: selecionado ? FontWeight.bold : FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               ),
+                            );
+                          }),
+                          const Spacer(),
+                          // Botão para alternar entre gráfico de linha e velas
+                          GestureDetector(
+                            onTap: _alternarTipoGrafico,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _mostrarVelas ? corDestaque : corPilula,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.candlestick_chart,
+                                    size: 16,
+                                    color: _mostrarVelas ? const Color(0xFF0A0014) : Colors.white70,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    "Velas",
+                                    style: TextStyle(
+                                      color: _mostrarVelas ? const Color(0xFF0A0014) : Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: _mostrarVelas ? FontWeight.bold : FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          );
-                        }).toList(),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
 
-                      // Gráfico do Preço
-                      GraficoDetalhes(
-                        pontos: _historico,
-                        carregando: _carregandoHistorico,
-                      ),
+                      // Gráfico: Linha ou Velas
+                      _mostrarVelas
+                          ? GraficoVelas(
+                              velas: _velas,
+                              carregando: _carregandoVelas,
+                            )
+                          : GraficoDetalhes(
+                              pontos: _historico,
+                              carregando: _carregandoHistorico,
+                            ),
                       const SizedBox(height: 24),
 
                       // Abas Segmentadas: [Visão geral, Análise técnica, Onde comprar]

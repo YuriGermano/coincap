@@ -50,4 +50,6 @@ class TaIndicators {
       macdHistogram: macdHist,
     );
   }
+
+  factory TaIndicators.vazio() => TaIndicators();
 }

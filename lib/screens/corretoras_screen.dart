@@ -349,6 +349,7 @@ class _FolhaPares extends StatefulWidget {
 
 class _FolhaParesState extends State<_FolhaPares> {
   late final Future<List<Market>> _futuro;
+  String _filtro = '';
 
   @override
   void initState() {
@@ -359,18 +360,55 @@ class _FolhaParesState extends State<_FolhaPares> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.7,
+      height: MediaQuery.of(context).size.height * 0.75,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.corretora.name,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  widget.corretora.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  widget.corretora.exchangeId.toUpperCase(),
+                  style: const TextStyle(
+                    color: corTextoSuave,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Campo de busca por abreviação (ex: BTC/USDT)
+            Container(
+              decoration: BoxDecoration(
+                color: corPilula,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TextField(
+                onChanged: (val) {
+                  setState(() {
+                    _filtro = val.trim().toUpperCase();
+                  });
+                },
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                cursorColor: corDestaque,
+                decoration: const InputDecoration(
+                  hintText: "Filtrar por abreviação (ex.: BTC/USDT, ETH)...",
+                  hintStyle: TextStyle(color: corTextoSuave, fontSize: 13),
+                  prefixIcon: Icon(Icons.search, color: corTextoSuave, size: 20),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -393,7 +431,16 @@ class _FolhaParesState extends State<_FolhaPares> {
                     );
                   }
 
-                  final mercados = snapshot.data ?? [];
+                  final todosMercados = snapshot.data ?? [];
+                  final mercados = _filtro.isEmpty
+                      ? todosMercados
+                      : todosMercados.where((m) {
+                          final par = "${m.baseSymbol}/${m.quoteSymbol}".toUpperCase();
+                          return par.contains(_filtro) ||
+                              m.baseSymbol.toUpperCase().contains(_filtro) ||
+                              m.quoteSymbol.toUpperCase().contains(_filtro);
+                        }).toList();
+
                   if (mercados.isEmpty) {
                     return const Center(
                       child: Text(
@@ -417,6 +464,7 @@ class _FolhaParesState extends State<_FolhaPares> {
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
@@ -428,6 +476,7 @@ class _FolhaParesState extends State<_FolhaPares> {
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 14,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 Text(

@@ -15,43 +15,52 @@ class FavoritosScreen extends StatefulWidget {
 }
 
 class _FavoritosScreenState extends State<FavoritosScreen> {
-  List<Asset> _ativosFavoritos = [];
-  bool _carregando = true;
+  final Map<String, Asset> _cacheAtivos = {};
+  bool _carregando = false;
+  Set<String> _ultimosSlugsCarregados = {};
 
   @override
   void initState() {
     super.initState();
-    _carregarFavoritos();
-    FavoritosService.instance.favoritosNotifier.addListener(_aoMudarFavoritos);
+    _sincronizarFavoritos(FavoritosService.instance.favoritos);
   }
 
-  @override
-  void dispose() {
-    FavoritosService.instance.favoritosNotifier.removeListener(_aoMudarFavoritos);
-    super.dispose();
-  }
+  Future<void> _sincronizarFavoritos(Set<String> slugs, {bool forcar = false}) async {
+    _ultimosSlugsCarregados = Set.from(slugs);
 
-  void _aoMudarFavoritos() {
-    _carregarFavoritos();
-  }
-
-  Future<void> _carregarFavoritos() async {
-    final slugs = FavoritosService.instance.favoritos.toList();
     if (slugs.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _ativosFavoritos = [];
-          _carregando = false;
-        });
-      }
+      if (mounted) setState(() => _carregando = false);
       return;
     }
 
+    // Copia ativos que já estão no cache central do FavoritosService
+    for (final s in slugs) {
+      final emMemoria = FavoritosService.instance.ativosCache[s];
+      if (emMemoria != null) {
+        _cacheAtivos[s] = emMemoria;
+      }
+    }
+
+    final faltando = slugs.where((s) => !_cacheAtivos.containsKey(s)).toList();
+    if (faltando.isEmpty && !forcar) {
+      if (mounted) setState(() => _carregando = false);
+      return;
+    }
+
+    setState(() => _carregando = true);
+
     try {
-      final ativos = await CoinCapService.buscarAtivos(slugs);
+      final ativos = await CoinCapService.buscarAtivos(
+        slugs.toList(),
+        forcarAtualizacao: forcar,
+      );
       if (mounted) {
         setState(() {
-          _ativosFavoritos = ativos;
+          for (final a in ativos) {
+            final key = a.slug.toLowerCase();
+            _cacheAtivos[key] = a;
+            FavoritosService.instance.salvarAtivo(a);
+          }
           _carregando = false;
         });
       }
@@ -63,6 +72,7 @@ class _FavoritosScreenState extends State<FavoritosScreen> {
   }
 
   void _abrirDetalhes(Asset ativo) {
+    FavoritosService.instance.salvarAtivo(ativo);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -74,7 +84,7 @@ class _FavoritosScreenState extends State<FavoritosScreen> {
     );
   }
 
-  Widget _cardFavorito(Asset ativo) {
+  Widget _cardFavorito(Asset ativo, bool isFavorito) {
     final subiu = (ativo.changePercent24Hr ?? 0) >= 0;
     final letra = ativo.symbol.isNotEmpty ? ativo.symbol[0] : 'F';
 
@@ -154,25 +164,38 @@ class _FavoritosScreenState extends State<FavoritosScreen> {
               ),
               const SizedBox(width: 12),
               GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () {
-                  FavoritosService.instance.alternar(ativo.slug);
+                  FavoritosService.instance.alternar(ativo.slug, ativo);
+                  ScaffoldMessenger.of(context).clearSnackBars();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      duration: const Duration(seconds: 1),
-                      backgroundColor: corPilula,
+                      duration: const Duration(seconds: 2),
+                      backgroundColor: corCartao,
                       content: Text(
-                        "${ativo.name} removido dos favoritos",
+                        isFavorito
+                            ? "${ativo.name} removido dos favoritos"
+                            : "${ativo.name} adicionado aos favoritos!",
                         style: const TextStyle(color: Colors.white),
                       ),
+                      action: isFavorito
+                          ? SnackBarAction(
+                              label: "Desfazer",
+                              textColor: corDestaque,
+                              onPressed: () {
+                                FavoritosService.instance.adicionar(ativo.slug, ativo);
+                              },
+                            )
+                          : null,
                     ),
                   );
                 },
-                child: const Padding(
-                  padding: EdgeInsets.all(4),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
                   child: Icon(
-                    Icons.star,
-                    color: Color(0xFFFBBF24),
-                    size: 22,
+                    isFavorito ? Icons.star : Icons.star_border,
+                    color: isFavorito ? const Color(0xFFFBBF24) : Colors.white38,
+                    size: 24,
                   ),
                 ),
               ),
@@ -186,82 +209,115 @@ class _FavoritosScreenState extends State<FavoritosScreen> {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: RefreshIndicator(
-        color: corDestaque,
-        backgroundColor: corCartao,
-        onRefresh: _carregarFavoritos,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Favoritos",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Favoritos",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
               ),
-              const SizedBox(height: 20),
+            ),
+            const SizedBox(height: 20),
 
-              Expanded(
-                child: _carregando && _ativosFavoritos.isEmpty
-                    ? const Center(child: CircularProgressIndicator(color: corDestaque))
-                    : _ativosFavoritos.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.star_border,
-                                  size: 64,
-                                  color: corTextoSuave,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  "Nenhum favorito ainda",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 32),
-                                  child: Text(
-                                    "Toque na estrela de qualquer ativo para adicioná-lo aos seus favoritos e acompanhar seus preços aqui.",
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: corTextoSuave,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                if (widget.onIrParaMercado != null)
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: corCartao,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    onPressed: widget.onIrParaMercado,
-                                    child: const Text("Explorar Mercado"),
-                                  ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: _ativosFavoritos.length,
-                            itemBuilder: (context, i) => _cardFavorito(_ativosFavoritos[i]),
+            // ValueListenableBuilder atualiza a tela instantaneamente ao favoritar/desfavoritar
+            Expanded(
+              child: ValueListenableBuilder<Set<String>>(
+                valueListenable: FavoritosService.instance.favoritosNotifier,
+                builder: (context, favoritosSlugs, _) {
+                  // Se houver novos slugs que ainda não foram sincronizados
+                  final novos = favoritosSlugs.difference(_ultimosSlugsCarregados);
+                  if (novos.isNotEmpty) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _sincronizarFavoritos(favoritosSlugs);
+                    });
+                  }
+
+                  if (favoritosSlugs.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.star_border,
+                            size: 64,
+                            color: corTextoSuave,
                           ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            "Nenhum favorito ainda",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              "Toque na estrela de qualquer ativo para adicioná-lo aos seus favoritos e acompanhar seus preços aqui.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: corTextoSuave,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          if (widget.onIrParaMercado != null)
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: corCartao,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onPressed: widget.onIrParaMercado,
+                              child: const Text("Explorar Mercado"),
+                            ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  // Monta a lista com os ativos favoritados
+                  final ativosFav = <Asset>[];
+                  for (final slug in favoritosSlugs) {
+                    final ativo = _cacheAtivos[slug] ?? FavoritosService.instance.ativosCache[slug];
+                    if (ativo != null) {
+                      ativosFav.add(ativo);
+                    }
+                  }
+
+                  if (_carregando && ativosFav.isEmpty) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: corDestaque),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    color: corDestaque,
+                    backgroundColor: corCartao,
+                    onRefresh: () => _sincronizarFavoritos(favoritosSlugs, forcar: true),
+                    child: ListView.builder(
+                      itemCount: ativosFav.length,
+                      itemBuilder: (context, i) {
+                        final ativo = ativosFav[i];
+                        final isFav = favoritosSlugs.contains(ativo.slug.toLowerCase());
+                        return _cardFavorito(ativo, isFav);
+                      },
+                    ),
+                  );
+                },
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

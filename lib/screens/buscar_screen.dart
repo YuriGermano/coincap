@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/asset.dart';
+import '../models/market.dart';
 import '../services/coincap_service.dart';
+import '../services/favoritos_service.dart';
 import '../utils/formatadores.dart';
 import 'detalhes_ativo_screen.dart';
 
@@ -16,6 +18,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   final TextEditingController _controller = TextEditingController();
   Timer? _debounce;
   List<Asset> _resultados = [];
+  List<Market> _resultadosMercados = [];
   bool _buscando = false;
   String _termoBuscado = '';
 
@@ -60,6 +63,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       setState(() {
         _termoBuscado = '';
         _resultados = [];
+        _resultadosMercados = [];
         _buscando = false;
       });
       return;
@@ -72,10 +76,60 @@ class _BuscarScreenState extends State<BuscarScreen> {
       });
 
       try {
+        // Verifica se é busca de mercado por abreviação (ex.: BTC/USDT, BTC-USDT, BTC USDT ou BTCUSDT)
+        String base = '';
+        String quote = '';
+        bool ehBuscaMercado = false;
+
+        final separador = texto.contains('/')
+            ? '/'
+            : (texto.contains('-')
+                ? '-'
+                : (texto.contains('_') ? '_' : (texto.contains(' ') ? ' ' : '')));
+
+        if (separador.isNotEmpty) {
+          final partes = texto.toUpperCase().split(separador);
+          base = partes[0].trim();
+          quote = partes.length > 1 ? partes[1].trim() : '';
+          ehBuscaMercado = base.isNotEmpty;
+        } else if (texto.length >= 6) {
+          final upper = texto.toUpperCase();
+          if (upper.endsWith('USDT')) {
+            base = upper.substring(0, upper.length - 4);
+            quote = 'USDT';
+            ehBuscaMercado = true;
+          } else if (upper.endsWith('USD') && upper.length >= 6) {
+            base = upper.substring(0, upper.length - 3);
+            quote = 'USD';
+            ehBuscaMercado = true;
+          } else if (upper.endsWith('BRL') && upper.length >= 6) {
+            base = upper.substring(0, upper.length - 3);
+            quote = 'BRL';
+            ehBuscaMercado = true;
+          }
+        }
+
+        if (ehBuscaMercado) {
+          final mercados = await CoinCapService.buscarMercadosComFiltro(
+            baseSymbol: base.isNotEmpty ? base : null,
+            quoteSymbol: quote.isNotEmpty ? quote : null,
+            limit: 25,
+          );
+          if (mounted && mercados.isNotEmpty) {
+            setState(() {
+              _resultadosMercados = mercados;
+              _resultados = [];
+              _buscando = false;
+            });
+            return;
+          }
+        }
+
         final resultados = await CoinCapService.buscarAtivosPorNome(texto);
         if (mounted) {
           setState(() {
             _resultados = resultados;
+            _resultadosMercados = [];
             _buscando = false;
           });
         }
@@ -88,6 +142,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
               .toList();
           setState(() {
             _resultados = filtrados;
+            _resultadosMercados = [];
             _buscando = false;
           });
         }
@@ -178,8 +233,98 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 ),
               ],
             ),
+            const SizedBox(width: 8),
+            ValueListenableBuilder<Set<String>>(
+              valueListenable: FavoritosService.instance.favoritosNotifier,
+              builder: (context, favoritos, _) {
+                final isFav = favoritos.contains(ativo.slug.toLowerCase());
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    FavoritosService.instance.alternar(ativo.slug, ativo);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      isFav ? Icons.star : Icons.star_border,
+                      color: isFav ? const Color(0xFFFBBF24) : Colors.white30,
+                      size: 20,
+                    ),
+                  ),
+                );
+              },
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _itemMercado(Market mercado) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: corPilula,
+            child: Text(
+              mercado.exchangeId.isNotEmpty ? mercado.exchangeId[0].toUpperCase() : 'M',
+              style: const TextStyle(
+                color: corDestaque,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "${mercado.baseSymbol}/${mercado.quoteSymbol}",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  mercado.exchangeId.toUpperCase(),
+                  style: const TextStyle(
+                    color: corTextoSuave,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                formatarPreco(mercado.priceUsd, prefixo: '\$'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                "Vol: ${formatarCompacto(mercado.volumeUsd24Hr, prefixo: '\$')}",
+                style: const TextStyle(
+                  color: corTextoSuave,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -218,7 +363,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 style: const TextStyle(color: Colors.white, fontSize: 15),
                 cursorColor: corDestaque,
                 decoration: InputDecoration(
-                  hintText: "Buscar por nome ou símbolo (ex: sol)",
+                  hintText: "Buscar por nome, símbolo ou par (ex: BTC/USDT)",
                   hintStyle: const TextStyle(color: corTextoSuave, fontSize: 14),
                   prefixIcon: const Icon(Icons.search, color: corTextoSuave),
                   suffixIcon: _controller.text.isNotEmpty
@@ -253,7 +398,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
             Expanded(
               child: _buscando
                   ? const Center(child: CircularProgressIndicator(color: corDestaque))
-                  : _termoBuscado.isNotEmpty && _resultados.isEmpty
+                  : _termoBuscado.isNotEmpty && _resultados.isEmpty && _resultadosMercados.isEmpty
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -269,14 +414,23 @@ class _BuscarScreenState extends State<BuscarScreen> {
                         )
                       : _termoBuscado.isEmpty && _carregandoSugestoes
                           ? const Center(child: CircularProgressIndicator(color: corDestaque))
-                          : ListView.separated(
-                              itemCount: listaAtual.length,
-                              separatorBuilder: (_, _) => Divider(
-                                color: Colors.white.withValues(alpha: 0.04),
-                                height: 1,
-                              ),
-                              itemBuilder: (context, i) => _itemResultado(listaAtual[i]),
-                            ),
+                          : _resultadosMercados.isNotEmpty
+                              ? ListView.separated(
+                                  itemCount: _resultadosMercados.length,
+                                  separatorBuilder: (_, _) => Divider(
+                                    color: Colors.white.withValues(alpha: 0.04),
+                                    height: 1,
+                                  ),
+                                  itemBuilder: (context, i) => _itemMercado(_resultadosMercados[i]),
+                                )
+                              : ListView.separated(
+                                  itemCount: listaAtual.length,
+                                  separatorBuilder: (_, _) => Divider(
+                                    color: Colors.white.withValues(alpha: 0.04),
+                                    height: 1,
+                                  ),
+                                  itemBuilder: (context, i) => _itemResultado(listaAtual[i]),
+                                ),
             ),
           ],
         ),

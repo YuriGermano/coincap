@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/asset.dart';
+import '../models/candlestick.dart';
+import '../models/compact_history.dart';
 import '../models/exchange.dart';
 import '../models/market.dart';
 import '../models/price_point.dart';
@@ -19,8 +21,7 @@ class CoinCapService {
 
   // Rotação de chaves: se uma atingir rate limit (429), alterna automaticamente para a outra
   static final List<String> _apiKeys = [
-    '9dcd68c96ba0f7835834d843d5177ada774c360b9a923444b7581723def24114',
-    'b17a68cb2a9151f65c83e46563e86ff450c5fef67f54a6166666c6db4d42b794',
+    '55dac914c55b002b76343e7c1e9cc7480373847f3ccf89967ea51ba2d3b2041b'
   ];
   static int _chaveIndiceAtual = 0;
 
@@ -81,21 +82,27 @@ class CoinCapService {
     _Resposta? guardada,
     String caminho,
   ) async {
-    // Tenta as chaves disponíveis com timeout rápido para não travar a UI
+    // Tenta as chaves disponíveis com timeout adequado para mobile e desktop
     for (int i = 0; i < _apiKeys.length; i++) {
       final apiKey = _apiKeys[_chaveIndiceAtual];
       try {
         final response = await http.get(
           uri,
-          headers: {'Authorization': 'Bearer $apiKey'},
-        ).timeout(const Duration(seconds: 7));
+          headers: {
+            'Authorization': 'Bearer $apiKey',
+            'Accept': 'application/json',
+            'User-Agent': 'CoinCapApp/1.0',
+          },
+        ).timeout(const Duration(seconds: 12));
 
         if (response.statusCode == 200) {
           final corpo = json.decode(response.body) as Map<String, dynamic>;
           _cache[chave] = _Resposta(DateTime.now(), corpo);
           _bloqueioRateLimitAte = null;
           return corpo;
-        } else if (response.statusCode == 429) {
+        } else if (response.statusCode == 429 ||
+            response.statusCode == 403 ||
+            response.statusCode == 401) {
           // Alterna chave e tenta a próxima
           _chaveIndiceAtual = (_chaveIndiceAtual + 1) % _apiKeys.length;
           continue;
@@ -104,7 +111,7 @@ class CoinCapService {
           break;
         }
       } catch (_) {
-        // Timeout ou erro de rede: tenta chave alternativa se ainda não tentou
+        // Timeout ou erro de rede (comum em conexões mobile/3G/4G): tenta chave alternativa
         _chaveIndiceAtual = (_chaveIndiceAtual + 1) % _apiKeys.length;
       }
     }
@@ -232,13 +239,53 @@ class CoinCapService {
   }
 
   // 7. Mercados com filtros (Doc #7)
-  static Future<List<Market>> buscarMercados(String exchangeId) async {
+  static Future<List<Market>> buscarMercados([String? exchangeId]) async {
+    return buscarMercadosComFiltro(
+      exchangeId: exchangeId,
+    );
+  }
+
+  // 7b. Busca de mercados com filtros de abreviação (ex.: BTC/USDT)
+  static Future<List<Market>> buscarMercadosComFiltro({
+    String? exchangeId,
+    String? baseSymbol,
+    String? quoteSymbol,
+    String? assetSymbol,
+    int limit = 20,
+  }) async {
     try {
-      final corpo = await _get(
-        '/markets',
-        {'exchangeId': exchangeId, 'limit': '20'},
-      );
-      return MarketResponse.fromJson(corpo).data;
+      final params = <String, String>{'limit': limit.toString()};
+      if (exchangeId != null && exchangeId.isNotEmpty) {
+        params['exchangeId'] = exchangeId;
+      }
+      if (baseSymbol != null && baseSymbol.isNotEmpty) {
+        params['baseSymbol'] = baseSymbol;
+      }
+      if (quoteSymbol != null && quoteSymbol.isNotEmpty) {
+        params['quoteSymbol'] = quoteSymbol;
+      }
+      if (assetSymbol != null && assetSymbol.isNotEmpty) {
+        params['assetSymbol'] = assetSymbol;
+      }
+
+      final corpo = await _get('/markets', params);
+      var mercados = MarketResponse.fromJson(corpo).data;
+
+      if (baseSymbol != null && baseSymbol.isNotEmpty) {
+        final b = baseSymbol.toUpperCase();
+        mercados = mercados.where((m) => m.baseSymbol.toUpperCase() == b).toList();
+      }
+      if (quoteSymbol != null && quoteSymbol.isNotEmpty) {
+        final q = quoteSymbol.toUpperCase();
+        mercados = mercados.where((m) => m.quoteSymbol.toUpperCase() == q).toList();
+      }
+      if (assetSymbol != null && assetSymbol.isNotEmpty) {
+        final a = assetSymbol.toUpperCase();
+        mercados = mercados.where((m) =>
+            m.baseSymbol.toUpperCase() == a || m.quoteSymbol.toUpperCase() == a).toList();
+      }
+
+      return mercados;
     } catch (_) {
       return [];
     }
@@ -257,13 +304,84 @@ class CoinCapService {
         .toList();
   }
 
+  // 9. Taxa individual (Doc #9 - /rates/{slug})
+  static Future<Rate> buscarTaxaIndividual(String slug) async {
+    final corpo = await _get('/rates/$slug', null);
+    final data = corpo['data'];
+    if (data is Map<String, dynamic>) {
+      return Rate.fromJson(data);
+    }
+    if (data is List && data.isNotEmpty) {
+      final item = data.firstWhere(
+        (elem) => elem is Map && elem['id'] == slug,
+        orElse: () => data.first,
+      );
+      return Rate.fromJson(item as Map<String, dynamic>);
+    }
+    return Rate(id: slug, symbol: slug.toUpperCase(), type: 'crypto', rateUsd: 1.0);
+  }
+
+  // Alias para buscar taxa individual de uma moeda
+  static Future<Rate> buscarTaxa(String idOuSlug) => buscarTaxaIndividual(idOuSlug);
+
   // 10. Indicadores técnicos (Doc #10)
   static Future<TaIndicators> buscarIndicadoresTecnicos(String slug) async {
+    try {
+      final corpo = await _get(
+        '/ta/$slug/allLatest',
+        {'fetchInterval': 'd1'},
+      );
+      return TaIndicators.fromJson(corpo);
+    } catch (_) {
+      return TaIndicators.vazio();
+    }
+  }
+
+  // 10b. Gráfico de velas (candlesticks) - /ta/{slug}/candlesticks
+  static Future<List<Candlestick>> buscarVelas(
+    String slug, {
+    String interval = 'h1',
+    int? start,
+    int? end,
+  }) async {
+    try {
+      final params = <String, String>{'interval': interval};
+      if (start != null) params['start'] = start.toString();
+      if (end != null) params['end'] = end.toString();
+
+      final corpo = await _get('/ta/$slug/candlesticks', params);
+      final data = corpo['data'] as List? ?? [];
+      return data
+          .map((item) => Candlestick.fromJson(item as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // Alias para buscar gráfico de velas
+  static Future<List<Candlestick>> buscarCandlesticks(
+    String slug, {
+    String interval = 'h1',
+    int? start,
+    int? end,
+  }) => buscarVelas(slug, interval: interval, start: start, end: end);
+
+  // 10c. Histórico compactado - /agentFriendly/history/{slug}
+  static Future<CompactHistory> buscarHistoricoCompactado(
+    String slug, {
+    int? start,
+    int? end,
+  }) async {
+    final params = <String, String>{};
+    if (start != null) params['start'] = start.toString();
+    if (end != null) params['end'] = end.toString();
+
     final corpo = await _get(
-      '/ta/$slug/allLatest',
-      {'fetchInterval': 'd1'},
+      '/agentFriendly/history/$slug',
+      params.isEmpty ? null : params,
     );
-    return TaIndicators.fromJson(corpo);
+    return CompactHistory.fromJson(corpo);
   }
 
   // 12. Busca de ativos (Doc #12)
@@ -522,6 +640,25 @@ class CoinCapService {
       };
     }
 
+    // Taxa individual: /rates/{slug}
+    if (RegExp(r'/rates/[^/?]+').hasMatch(caminho)) {
+      final slug = caminho.split('/rates/').last.split('?').first.toLowerCase();
+      final rates = [
+        {'id': 'bitcoin', 'symbol': 'BTC', 'currencySymbol': '₿', 'type': 'crypto', 'rateUsd': '86029.80'},
+        {'id': 'ethereum', 'symbol': 'ETH', 'currencySymbol': 'Ξ', 'type': 'crypto', 'rateUsd': '2718.00'},
+        {'id': 'solana', 'symbol': 'SOL', 'currencySymbol': 'S', 'type': 'crypto', 'rateUsd': '121.02'},
+        {'id': 'united-states-dollar', 'symbol': 'USD', 'currencySymbol': '\$', 'type': 'fiat', 'rateUsd': '1.0'},
+        {'id': 'brazilian-real', 'symbol': 'BRL', 'currencySymbol': 'R\$', 'type': 'fiat', 'rateUsd': '0.175'},
+        {'id': 'euro', 'symbol': 'EUR', 'currencySymbol': '€', 'type': 'fiat', 'rateUsd': '1.085'},
+        {'id': 'british-pound-sterling', 'symbol': 'GBP', 'currencySymbol': '£', 'type': 'fiat', 'rateUsd': '1.295'},
+      ];
+      final item = rates.firstWhere(
+        (r) => r['id'] == slug || r['symbol']?.toString().toLowerCase() == slug,
+        orElse: () => {'id': slug, 'symbol': slug.toUpperCase(), 'currencySymbol': '', 'type': 'crypto', 'rateUsd': '1.0'},
+      );
+      return {'data': item};
+    }
+
     if (caminho.contains('/rates')) {
       return {
         'data': [
@@ -533,6 +670,86 @@ class CoinCapService {
           {'id': 'ethereum', 'symbol': 'ETH', 'currencySymbol': 'Ξ', 'type': 'crypto', 'rateUsd': '2718.00'},
           {'id': 'solana', 'symbol': 'SOL', 'currencySymbol': 'S', 'type': 'crypto', 'rateUsd': '121.02'},
         ]
+      };
+    }
+
+    if (caminho.contains('/markets')) {
+      return {
+        'data': [
+          {'exchangeId': 'binance', 'baseSymbol': 'BTC', 'quoteSymbol': 'USDT', 'priceUsd': '86029.80', 'volumeUsd24Hr': '25326078071', 'volumePercent': '35.4'},
+          {'exchangeId': 'binance', 'baseSymbol': 'ETH', 'quoteSymbol': 'USDT', 'priceUsd': '2718.00', 'volumeUsd24Hr': '8797634697', 'volumePercent': '22.1'},
+          {'exchangeId': 'binance', 'baseSymbol': 'SOL', 'quoteSymbol': 'USDT', 'priceUsd': '121.02', 'volumeUsd24Hr': '3405100234', 'volumePercent': '15.3'},
+          {'exchangeId': 'binance', 'baseSymbol': 'BNB', 'quoteSymbol': 'USDT', 'priceUsd': '788.49', 'volumeUsd24Hr': '751967211', 'volumePercent': '8.2'},
+          {'exchangeId': 'binance', 'baseSymbol': 'DOGE', 'quoteSymbol': 'USDT', 'priceUsd': '0.18', 'volumeUsd24Hr': '1240500120', 'volumePercent': '5.0'},
+          {'exchangeId': 'coinbase-pro', 'baseSymbol': 'BTC', 'quoteSymbol': 'USD', 'priceUsd': '86035.00', 'volumeUsd24Hr': '15326078071', 'volumePercent': '20.4'},
+          {'exchangeId': 'coinbase-pro', 'baseSymbol': 'ETH', 'quoteSymbol': 'USD', 'priceUsd': '2719.10', 'volumeUsd24Hr': '5797634697', 'volumePercent': '12.1'},
+          {'exchangeId': 'coinbase-pro', 'baseSymbol': 'SOL', 'quoteSymbol': 'USD', 'priceUsd': '121.15', 'volumeUsd24Hr': '2405100234', 'volumePercent': '8.3'},
+          {'exchangeId': 'bybit', 'baseSymbol': 'BTC', 'quoteSymbol': 'USDT', 'priceUsd': '86020.00', 'volumeUsd24Hr': '8326078071', 'volumePercent': '10.4'},
+          {'exchangeId': 'bybit', 'baseSymbol': 'ETH', 'quoteSymbol': 'USDT', 'priceUsd': '2717.50', 'volumeUsd24Hr': '3797634697', 'volumePercent': '6.1'},
+          {'exchangeId': 'kraken', 'baseSymbol': 'BTC', 'quoteSymbol': 'EUR', 'priceUsd': '86015.00', 'volumeUsd24Hr': '4326078071', 'volumePercent': '5.4'},
+          {'exchangeId': 'kucoin', 'baseSymbol': 'SOL', 'quoteSymbol': 'USDT', 'priceUsd': '121.00', 'volumeUsd24Hr': '1405100234', 'volumePercent': '4.3'},
+        ]
+      };
+    }
+
+    // Indicadores técnicos /ta/
+    if (caminho.contains('/ta/')) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      return {
+        'data': {
+          'rsi': {'rsi14': 52.3},
+          'macd': {'macd': 120.5, 'signal': 105.2, 'histogram': 15.3},
+          'bollingerBands': {'upper': 88500.0, 'middle': 86000.0, 'lower': 83500.0},
+          'candlesticks': [
+            {'time': now - 86400000 * 3, 'open': 84200.0, 'high': 85500.0, 'low': 83800.0, 'close': 85100.0},
+            {'time': now - 86400000 * 2, 'open': 85100.0, 'high': 86200.0, 'low': 84900.0, 'close': 85900.0},
+            {'time': now - 86400000 * 1, 'open': 85900.0, 'high': 87100.0, 'low': 85300.0, 'close': 86029.8},
+          ],
+        }
+      };
+    }
+
+    if (caminho.contains('/agentFriendly/')) {
+      if (caminho.contains('assets_search') || caminho.contains('full_assets_by_slug') || caminho.contains('top_movers')) {
+        return {'data': []};
+      }
+      return {'data': {}};
+    }
+
+    if (caminho.contains('/price/')) {
+      return {'data': [null]};
+    }
+
+    if (caminho.contains('/candlesticks')) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      return {
+        'data': [
+          {'time': now - 86400000 * 4, 'open': 84200.0, 'high': 85500.0, 'low': 83800.0, 'close': 85100.0},
+          {'time': now - 86400000 * 3, 'open': 85100.0, 'high': 86200.0, 'low': 84900.0, 'close': 85900.0},
+          {'time': now - 86400000 * 2, 'open': 85900.0, 'high': 87100.0, 'low': 85300.0, 'close': 86400.0},
+          {'time': now - 86400000 * 1, 'open': 86400.0, 'high': 86800.0, 'low': 85500.0, 'close': 86029.8},
+        ]
+      };
+    }
+
+    if (caminho.contains('/history')) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final csv = [
+        '${now - 86400000 * 4},84200.0',
+        '${now - 86400000 * 3},85100.0',
+        '${now - 86400000 * 2},85900.0',
+        '${now - 86400000 * 1},86400.0',
+        '$now,86029.8',
+      ].join('\n');
+      return {
+        'data': {
+          'slug': 'bitcoin',
+          'startTime': now - 86400000 * 4,
+          'endTime': now,
+          'intervalMinutes': 60,
+          'dataPoints': 5,
+          'history': csv,
+        }
       };
     }
 
