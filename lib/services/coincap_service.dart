@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/asset.dart';
 import '../models/candlestick.dart';
 import '../models/compact_history.dart';
@@ -19,10 +20,19 @@ class _Resposta {
 class CoinCapService {
   static const String _baseUrl = 'https://rest.coincap.io/v3';
 
-  // Rotação de chaves: se uma atingir rate limit (429), alterna automaticamente para a outra
-  static final List<String> _apiKeys = [
-    '55dac914c55b002b76343e7c1e9cc7480373847f3ccf89967ea51ba2d3b2041b',
-  ];
+  // Rotação de chaves: lê do .env (API_KEY) com fallback se necessário
+  static List<String> get _apiKeys {
+    final envKey = dotenv.env['API_KEY']?.trim();
+    final keys = <String>[];
+    if (envKey != null && envKey.isNotEmpty) {
+      keys.add(envKey);
+    }
+    const fallbackKey = '55dac914c55b002b76343e7c1e9cc7480373847f3ccf89967ea51ba2d3b2041b';
+    if (!keys.contains(fallbackKey)) {
+      keys.add(fallbackKey);
+    }
+    return keys;
+  }
   static int _chaveIndiceAtual = 0;
 
   // Cache em memória com duração inteligente para respeitar o limite de 5 req/min
@@ -82,9 +92,12 @@ class CoinCapService {
     _Resposta? guardada,
     String caminho,
   ) async {
+    final keys = _apiKeys;
+    final totalChaves = keys.length;
+
     // Tenta as chaves disponíveis com timeout adequado para mobile e desktop
-    for (int i = 0; i < _apiKeys.length; i++) {
-      final apiKey = _apiKeys[_chaveIndiceAtual];
+    for (int i = 0; i < totalChaves; i++) {
+      final apiKey = keys[_chaveIndiceAtual % totalChaves];
       try {
         final response = await http.get(
           uri,
@@ -104,7 +117,7 @@ class CoinCapService {
             response.statusCode == 403 ||
             response.statusCode == 401) {
           // Alterna chave e tenta a próxima
-          _chaveIndiceAtual = (_chaveIndiceAtual + 1) % _apiKeys.length;
+          _chaveIndiceAtual = (_chaveIndiceAtual + 1) % totalChaves;
           continue;
         } else {
           // Outro status HTTP
@@ -112,7 +125,7 @@ class CoinCapService {
         }
       } catch (_) {
         // Timeout ou erro de rede (comum em conexões mobile/3G/4G): tenta chave alternativa
-        _chaveIndiceAtual = (_chaveIndiceAtual + 1) % _apiKeys.length;
+        _chaveIndiceAtual = (_chaveIndiceAtual + 1) % totalChaves;
       }
     }
 

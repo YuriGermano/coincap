@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/buscar_screen.dart';
 import 'screens/cadastro_screen.dart';
 import 'screens/comparar_screen.dart';
@@ -9,7 +10,13 @@ import 'screens/favoritos_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/mercado_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Aviso: arquivo .env não carregado: $e");
+  }
   runApp(const CoinCapApp());
 }
 
