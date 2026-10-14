@@ -47,7 +47,7 @@ class CandlestickResponse {
   CandlestickResponse({required this.data});
 
   factory CandlestickResponse.fromJson(Map<String, dynamic> json) {
-    final list = json['data'] as List? ?? [];
+    final list = (json['data'] ?? json['candles']) as List? ?? [];
     return CandlestickResponse(
       data: list
           .map((item) => Candlestick.fromJson(item as Map<String, dynamic>))

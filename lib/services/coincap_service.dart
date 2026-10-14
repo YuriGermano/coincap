@@ -21,7 +21,7 @@ class CoinCapService {
 
   // Rotação de chaves: se uma atingir rate limit (429), alterna automaticamente para a outra
   static final List<String> _apiKeys = [
-    '55dac914c55b002b76343e7c1e9cc7480373847f3ccf89967ea51ba2d3b2041b'
+    '55dac914c55b002b76343e7c1e9cc7480373847f3ccf89967ea51ba2d3b2041b',
   ];
   static int _chaveIndiceAtual = 0;
 
@@ -350,7 +350,7 @@ class CoinCapService {
       if (end != null) params['end'] = end.toString();
 
       final corpo = await _get('/ta/$slug/candlesticks', params);
-      final data = corpo['data'] as List? ?? [];
+      final data = (corpo['data'] ?? corpo['candles']) as List? ?? [];
       return data
           .map((item) => Candlestick.fromJson(item as Map<String, dynamic>))
           .toList();
@@ -692,6 +692,19 @@ class CoinCapService {
       };
     }
 
+    // Gráfico de velas (candlesticks): /ta/{slug}/candlesticks
+    if (caminho.contains('/candlesticks')) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      return {
+        'data': [
+          {'time': now - 86400000 * 4, 'open': 84200.0, 'high': 85500.0, 'low': 83800.0, 'close': 85100.0},
+          {'time': now - 86400000 * 3, 'open': 85100.0, 'high': 86200.0, 'low': 84900.0, 'close': 85900.0},
+          {'time': now - 86400000 * 2, 'open': 85900.0, 'high': 87100.0, 'low': 85300.0, 'close': 86400.0},
+          {'time': now - 86400000 * 1, 'open': 86400.0, 'high': 86800.0, 'low': 85500.0, 'close': 86029.8},
+        ]
+      };
+    }
+
     // Indicadores técnicos /ta/
     if (caminho.contains('/ta/')) {
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -718,18 +731,6 @@ class CoinCapService {
 
     if (caminho.contains('/price/')) {
       return {'data': [null]};
-    }
-
-    if (caminho.contains('/candlesticks')) {
-      final now = DateTime.now().millisecondsSinceEpoch;
-      return {
-        'data': [
-          {'time': now - 86400000 * 4, 'open': 84200.0, 'high': 85500.0, 'low': 83800.0, 'close': 85100.0},
-          {'time': now - 86400000 * 3, 'open': 85100.0, 'high': 86200.0, 'low': 84900.0, 'close': 85900.0},
-          {'time': now - 86400000 * 2, 'open': 85900.0, 'high': 87100.0, 'low': 85300.0, 'close': 86400.0},
-          {'time': now - 86400000 * 1, 'open': 86400.0, 'high': 86800.0, 'low': 85500.0, 'close': 86029.8},
-        ]
-      };
     }
 
     if (caminho.contains('/history')) {

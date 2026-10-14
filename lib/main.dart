@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'screens/buscar_screen.dart';
+import 'screens/cadastro_screen.dart';
 import 'screens/comparar_screen.dart';
 import 'screens/conversor_screen.dart';
 import 'screens/corretoras_screen.dart';
 import 'screens/detalhes_ativo_screen.dart';
 import 'screens/favoritos_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/mercado_screen.dart';
 
 void main() {
@@ -24,8 +26,14 @@ class CoinCapApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF0A0014),
         fontFamily: 'Roboto',
       ),
-      initialRoute: '/',
+      initialRoute: '/login',
       onGenerateRoute: (settings) {
+        if (settings.name == '/login') {
+          return MaterialPageRoute(builder: (_) => const LoginScreen());
+        }
+        if (settings.name == '/cadastro') {
+          return MaterialPageRoute(builder: (_) => const CadastroScreen());
+        }
         if (settings.name == '/detalhes') {
           final slug = settings.arguments as String? ?? 'bitcoin';
           return MaterialPageRoute(

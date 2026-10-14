@@ -23,8 +23,10 @@ void main() async {
   for (final entry in funcs.entries) {
     try {
       final res = await entry.value();
+      // ignore: avoid_print
       print('[OK] ${entry.key}: $res');
     } catch (e) {
+      // ignore: avoid_print
       print('[ERRO] ${entry.key}: $e');
     }
   }
