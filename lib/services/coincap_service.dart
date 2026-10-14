@@ -18,7 +18,13 @@ class _Resposta {
 }
 
 class CoinCapService {
-  static const String _baseUrl = 'https://rest.coincap.io/v3';
+  static String get _baseUrl {
+    final envUrl = dotenv.env['API_BASE_URL']?.trim();
+    if (envUrl != null && envUrl.isNotEmpty) {
+      return envUrl;
+    }
+    return 'https://rest.coincap.io/v3';
+  }
 
   // Rotação de chaves: lê do .env (API_KEY) com fallback se necessário
   static List<String> get _apiKeys {
@@ -99,6 +105,10 @@ class CoinCapService {
     for (int i = 0; i < totalChaves; i++) {
       final apiKey = keys[_chaveIndiceAtual % totalChaves];
       try {
+        final timeoutMs = int.tryParse(dotenv.env['API_TIMEOUT']?.trim() ?? '');
+        final timeoutDuration = timeoutMs != null && timeoutMs > 0
+            ? Duration(milliseconds: timeoutMs)
+            : const Duration(seconds: 12);
         final response = await http.get(
           uri,
           headers: {
@@ -106,7 +116,7 @@ class CoinCapService {
             'Accept': 'application/json',
             'User-Agent': 'CoinCapApp/1.0',
           },
-        ).timeout(const Duration(seconds: 12));
+        ).timeout(timeoutDuration);
 
         if (response.statusCode == 200) {
           final corpo = json.decode(response.body) as Map<String, dynamic>;
@@ -404,6 +414,16 @@ class CoinCapService {
 
     try {
       final corpo = await _get(
+        '/assets',
+        {'search': texto, 'limit': '20'},
+        usarCache: true,
+      );
+      final lista = AssetResponse.fromJson(corpo).data;
+      if (lista.isNotEmpty) return lista;
+    } catch (_) {}
+
+    try {
+      final corpo = await _get(
         '/agentFriendly/assets_search',
         {'search': texto, 'limit': '20', 'sortBy': 'marketCap'},
         usarCache: true,
@@ -487,6 +507,11 @@ class CoinCapService {
       for (final s in slugs) {
         if (mapa.containsKey(s)) {
           resultado.add(mapa[s]!);
+        } else {
+          try {
+            final detalhe = await buscarDetalhesAtivo(s);
+            resultado.add(detalhe);
+          } catch (_) {}
         }
       }
       return resultado;

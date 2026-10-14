@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/asset.dart';
 import '../services/coincap_service.dart';
@@ -61,7 +62,7 @@ class _CompararScreenState extends State<CompararScreen> {
       return;
     }
 
-    final slug = await showModalBottomSheet<String>(
+    final selecionado = await showModalBottomSheet<Asset>(
       context: context,
       isScrollControlled: true,
       backgroundColor: corCartao,
@@ -71,8 +72,11 @@ class _CompararScreenState extends State<CompararScreen> {
       builder: (context) => const _BuscaAtivo(),
     );
 
-    if (slug == null || !mounted) return;
-    if (_ativos.any((a) => a.slug == slug)) return;
+    if (selecionado == null || !mounted) return;
+    if (_ativos.any((a) => a.slug.toLowerCase() == selecionado.slug.toLowerCase())) {
+      _aviso("Este ativo já está na lista");
+      return;
+    }
 
     setState(() {
       _adicionando = true;
@@ -80,9 +84,18 @@ class _CompararScreenState extends State<CompararScreen> {
 
     List<Asset> novos = [];
     try {
-      novos = await CoinCapService.buscarAtivos([slug]);
-    } catch (e) {
+      novos = await CoinCapService.buscarAtivos([selecionado.slug]);
+    } catch (_) {
       novos = [];
+    }
+
+    if (novos.isEmpty) {
+      try {
+        final detalhe = await CoinCapService.buscarDetalhesAtivo(selecionado.slug);
+        novos = [detalhe];
+      } catch (_) {
+        novos = [selecionado];
+      }
     }
 
     if (!mounted) return;
@@ -348,107 +361,157 @@ class _BuscaAtivo extends StatefulWidget {
 
 class _BuscaAtivoState extends State<_BuscaAtivo> {
   final TextEditingController _controller = TextEditingController();
+  Timer? _debounce;
+  List<Asset> _sugestoes = [];
   List<Asset> _resultados = [];
   bool _buscando = false;
-  bool _buscou = false;
-  bool _erro = false;
+  bool _carregandoSugestoes = true;
+  String _termo = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarSugestoes();
+  }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _buscar() async {
-    final texto = _controller.text.trim();
-    if (texto.isEmpty) return;
+  Future<void> _carregarSugestoes() async {
+    try {
+      final lista = await CoinCapService.buscarListaAtivos(limit: 30);
+      if (mounted) {
+        setState(() {
+          _sugestoes = lista;
+          _carregandoSugestoes = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _carregandoSugestoes = false);
+      }
+    }
+  }
 
+  void _aoDigitar(String valor) {
+    _debounce?.cancel();
+    final texto = valor.trim();
+
+    if (texto.isEmpty) {
+      setState(() {
+        _termo = '';
+        _resultados = [];
+        _buscando = false;
+      });
+      return;
+    }
+
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      _executarBusca(texto);
+    });
+  }
+
+  Future<void> _executarBusca(String texto) async {
+    if (!mounted) return;
     setState(() {
       _buscando = true;
-      _erro = false;
+      _termo = texto;
     });
 
-    List<Asset> resultados = [];
-    bool falhou = false;
+    List<Asset> res = [];
     try {
-      resultados = await CoinCapService.buscarAtivosPorNome(texto);
-    } catch (e) {
-      falhou = true;
+      res = await CoinCapService.buscarAtivosPorNome(texto);
+    } catch (_) {
+      res = [];
+    }
+
+    if (res.isEmpty) {
+      final lower = texto.toLowerCase();
+      res = _sugestoes
+          .where((a) =>
+              a.name.toLowerCase().contains(lower) ||
+              a.symbol.toLowerCase().contains(lower) ||
+              a.slug.toLowerCase().contains(lower))
+          .toList();
     }
 
     if (!mounted) return;
-
     setState(() {
-      _resultados = resultados;
-      _erro = falhou;
+      _resultados = res;
       _buscando = false;
-      _buscou = true;
     });
   }
 
   Widget _corpo() {
-    if (_buscando) {
+    if (_buscando || (_termo.isEmpty && _carregandoSugestoes)) {
       return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
+        child: CircularProgressIndicator(color: corDestaque),
       );
     }
 
-    String? mensagem;
-    if (_erro) {
-      mensagem = "Não foi possível buscar";
-    } else if (!_buscou) {
-      mensagem = "Digite o nome ou símbolo e toque em buscar";
-    } else if (_resultados.isEmpty) {
-      mensagem = "Nenhum ativo encontrado";
-    }
+    final lista = _termo.isEmpty ? _sugestoes : _resultados;
 
-    if (mensagem != null) {
-      return Center(
-        child: Text(mensagem, style: const TextStyle(color: corTextoSuave)),
+    if (lista.isEmpty) {
+      return const Center(
+        child: Text(
+          "Nenhum ativo encontrado",
+          style: TextStyle(color: corTextoSuave),
+        ),
       );
     }
 
-    return ListView.builder(
-      itemCount: _resultados.length,
+    return ListView.separated(
+      itemCount: lista.length,
+      separatorBuilder: (_, _) => const Divider(
+        color: Color(0xFF5A2380),
+        height: 1,
+      ),
       itemBuilder: (context, indice) {
-        final ativo = _resultados[indice];
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
+        final ativo = lista[indice];
+        final inicial = ativo.symbol.isNotEmpty ? ativo.symbol[0].toUpperCase() : '?';
+
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           onTap: () {
-            Navigator.pop(context, ativo.slug);
+            Navigator.pop(context, ativo);
           },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        ativo.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                        ),
-                      ),
-                      Text(
-                        ativo.symbol,
-                        style: const TextStyle(
-                          color: corTextoSuave,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  formatarPreco(ativo.price, prefixo: '\$'),
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                ),
-              ],
+          leading: CircleAvatar(
+            backgroundColor: corPilula,
+            child: Text(
+              inicial,
+              style: const TextStyle(
+                color: corDestaque,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          title: Text(
+            ativo.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            ativo.symbol,
+            style: const TextStyle(
+              color: corTextoSuave,
+              fontSize: 12,
+            ),
+          ),
+          trailing: Text(
+            formatarPreco(ativo.price, prefixo: '\$'),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
           ),
         );
@@ -459,41 +522,82 @@ class _BuscaAtivoState extends State<_BuscaAtivo> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SizedBox(
-        height: 420,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              TextField(
-                controller: _controller,
-                autofocus: true,
-                textInputAction: TextInputAction.search,
-                onSubmitted: (_) {
-                  _buscar();
-                },
-                style: const TextStyle(color: Colors.white),
-                cursorColor: corDestaque,
-                decoration: InputDecoration(
-                  hintText: "Buscar ativo (ex.: bitcoin, sol)",
-                  hintStyle: const TextStyle(color: corTextoSuave),
-                  prefixIcon: const Icon(Icons.search, color: corTextoSuave),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.arrow_forward, color: corDestaque),
-                    onPressed: _buscar,
-                  ),
-                  filled: true,
-                  fillColor: corPilula,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.75,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: corTextoSuave.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(child: _corpo()),
-            ],
+                TextField(
+                  controller: _controller,
+                  onChanged: _aoDigitar,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (val) {
+                    _debounce?.cancel();
+                    _executarBusca(val.trim());
+                  },
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: corDestaque,
+                  decoration: InputDecoration(
+                    hintText: "Buscar ativo (ex.: Bitcoin, SOL)",
+                    hintStyle: const TextStyle(color: corTextoSuave),
+                    prefixIcon: const Icon(Icons.search, color: corTextoSuave),
+                    suffixIcon: _controller.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close, color: corTextoSuave, size: 20),
+                            onPressed: () {
+                              _controller.clear();
+                              _aoDigitar('');
+                            },
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.arrow_forward, color: corDestaque),
+                            onPressed: () {
+                              _debounce?.cancel();
+                              _executarBusca(_controller.text.trim());
+                            },
+                          ),
+                    filled: true,
+                    fillColor: corPilula,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  child: Text(
+                    _termo.isEmpty ? "POPULARES" : "RESULTADOS",
+                    style: const TextStyle(
+                      color: corTextoSuave,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Expanded(child: _corpo()),
+              ],
+            ),
           ),
         ),
       ),
